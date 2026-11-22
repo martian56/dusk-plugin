@@ -7,7 +7,7 @@
 //
 // The protocol is described in dusk's docs/protocol.md.
 
-from std.io import read_line, print
+from std.io import read_line, print, eprintln
 from std.json import JsonValue, parse, stringify, json_int, json_string, json_object, json_array
 
 // Where messages come from and go to: stdin and stdout, or memory for tests.
@@ -15,6 +15,7 @@ class Io {
     input: list[str] = []
     at: int = 0
     written: list[str] = []
+    logged: list[str] = []
     real: bool = false
 }
 
@@ -169,6 +170,12 @@ impl Ctx {
     // Show text in dusk's message line.
     fun message(self, text: str) {
         self.notify("ui/message", obj([("text", jstr(text))]))
+    }
+
+    // Write a line to the plugin's log, shown in dusk by :plugin log <name>.
+    // It goes to stderr, never into the protocol.
+    fun log(self, text: str) {
+        eprintln(text) if self.io.real else self.io.logged.push(text)
     }
 
     fun error(self, text: str) {
