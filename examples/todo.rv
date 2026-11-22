@@ -1,0 +1,64 @@
+// Lists the TODO and FIXME lines of the current file in a panel and marks
+// them in the gutter. Choosing a row jumps to it.
+//
+//     [[plugin]]
+//     name = "todo"
+//     command = "path/to/todo"
+//     protocol = true
+
+from std.json import JsonValue
+from "../lib" import Ctx, plugin, param, int_param, list_block, text_block
+
+class Hits {
+    path: str = ""
+    rows: list[int] = []
+}
+
+let HITS: Hits = Hits()
+
+fun find(ctx: Ctx, params: JsonValue) {
+    let path = param(params, "path")
+    let text = match ctx.buffer_text(path) {
+        case Ok(t) { t }
+        case Err(e) {
+            ctx.error("todo: ${e}")
+            return
+        }
+    }
+    let rows: list[int] = []
+    let items: list[(str, str)] = []
+    let marks: list[(int, str, str)] = []
+    let lines = text.split("\n")
+    for i in range(len(lines)) {
+        let line = lines[i].trim()
+        if line.contains("TODO") or line.contains("FIXME") {
+            rows.push(i)
+            items.push((line, "line ${i + 1}"))
+            marks.push((i, "warning", line))
+        }
+    }
+    HITS.path = path
+    HITS.rows = rows
+    let summary = "No TODO or FIXME lines." if len(rows) == 0 else "${len(rows)} found. Enter jumps to one."
+    ctx.panel(
+        "todo",
+        "TODO ${path}",
+        "right",
+        [text_block("summary", summary), list_block("hits", items)],
+    )
+    ctx.marks(path, marks)
+}
+
+fun on_event(ctx: Ctx, params: JsonValue) {
+    if param(params, "block") != "hits" or param(params, "kind") != "choose" {
+        return
+    }
+    let i = int_param(params, "value", 0 - 1)
+    if i >= 0 and i < len(HITS.rows) {
+        ctx.open(HITS.path, HITS.rows[i] + 1)
+    }
+}
+
+fun main() {
+    plugin("todo").command("todo.find", "List TODO and FIXME lines", find).on("ui/event", on_event).serve()
+}
