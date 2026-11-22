@@ -1,0 +1,4 @@
+[package]
+name = "dusk-plugin"
+version = "0.1.0"
+edition = "v3"

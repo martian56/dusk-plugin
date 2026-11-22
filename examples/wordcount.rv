@@ -1,0 +1,43 @@
+// Shows the word count of the current file in dusk's status line, and its
+// word and line counts with the wordcount.show command.
+//
+//     [[plugin]]
+//     name = "wordcount"
+//     command = "path/to/wordcount"
+//     protocol = true
+
+from std.json import JsonValue
+from "../lib" import Ctx, plugin, param
+
+fun words(text: str) -> int {
+    var n = 0
+    for w in text.replace("\n", " ").replace("\t", " ").split(" ") {
+        if w != "" {
+            n += 1
+        }
+    }
+    return n
+}
+
+fun lines(text: str) -> int = len(text.split("\n")) - (1 if text.ends_with("\n") else 0)
+
+fun refresh(ctx: Ctx, params: JsonValue) {
+    match ctx.buffer_text(param(params, "path")) {
+        case Ok(t) { ctx.status("words", "words: ${words(t)}") }
+        case Err(e) {}
+    }
+}
+
+fun show(ctx: Ctx, params: JsonValue) {
+    match ctx.buffer_text(param(params, "path")) {
+        case Ok(t) { ctx.message("${words(t)} words, ${lines(t)} lines") }
+        case Err(e) { ctx.error("wordcount: ${e}") }
+    }
+}
+
+fun main() {
+    plugin("wordcount").command("wordcount.show", "Show the word and line count", show).on(
+        "buffer/opened",
+        refresh,
+    ).on("buffer/changed", refresh).serve()
+}

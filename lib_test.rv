@@ -1,0 +1,68 @@
+from std.test import assert_eq_str, assert_eq_int, assert_true
+from std.json import JsonValue, parse
+from "./lib" import Plugin, Ctx, plugin, param, memory
+
+fun hello(ctx: Ctx, params: JsonValue) {
+    ctx.message("hello ${param(params, "path")}")
+}
+
+fun count(ctx: Ctx, params: JsonValue) {
+    match ctx.buffer_text(param(params, "path")) {
+        case Ok(t) { ctx.status("chars", "chars: ${t.length()}") }
+        case Err(e) { ctx.message("failed: ${e}") }
+    }
+}
+
+fun opened(ctx: Ctx, params: JsonValue) {
+    ctx.status("last", param(params, "path"))
+}
+
+fun sample() -> Plugin {
+    return plugin("demo").command("demo.hello", "Say hello", hello).command(
+        "demo.count",
+        "Count",
+        count,
+    ).on("buffer/opened", opened).bind("normal", "g d", "demo.hello")
+}
+
+fun test_initialize_lists_commands_and_bindings() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"command/run\",\"params\":{\"command\":\"demo.hello\",\"path\":\"a.rv\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"command/run\",\"params\":{\"command\":\"demo.nope\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\"}",
+        ],
+    )
+    sample().serve_with(io)
+    let out = io.written
+    assert_eq_int(len(out), 5)
+    assert_true(out[0].contains("\"id\":1"))
+    assert_true(out[0].contains("demo.hello"))
+    assert_true(out[0].contains("\"keys\":\"g d\""))
+    assert_true(out[1].contains("ui/message"))
+    assert_true(out[1].contains("hello a.rv"))
+    assert_true(out[2].contains("\"id\":2") and out[2].contains("result"))
+    assert_true(out[3].contains("\"id\":3") and out[3].contains("error"))
+    assert_true(out[4].contains("\"id\":4"))
+}
+
+fun test_buffer_text_queues_other_messages() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"command/run\",\"params\":{\"command\":\"demo.count\",\"path\":\"a.rv\"}}",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"buffer/opened\",\"params\":{\"path\":\"b.rv\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"text\":\"abc\",\"version\":3}}",
+        ],
+    )
+    sample().serve_with(io)
+    let out = io.written
+    // initialize, the buffer/text request, the count status, the command
+    // result, then the queued buffer/opened handler's status.
+    assert_eq_int(len(out), 5)
+    assert_true(out[1].contains("buffer/text"))
+    assert_true(out[2].contains("chars: 3"))
+    assert_true(out[3].contains("\"id\":2"))
+    assert_true(out[4].contains("b.rv"))
+}

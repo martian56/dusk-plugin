@@ -1,0 +1,343 @@
+// Write dusk plugins in Raven. A plugin registers commands, event handlers,
+// and key bindings, then serves the protocol on stdin and stdout:
+//
+//     fun main() {
+//         plugin("wordcount").command("wordcount.show", "Show the word count", show).serve()
+//     }
+//
+// The protocol is described in dusk's docs/protocol.md.
+
+from std.io import read_line, print
+from std.json import JsonValue, parse, stringify, json_int, json_string, json_object, json_array
+
+// Where messages come from and go to: stdin and stdout, or memory for tests.
+class Io {
+    input: list[str] = []
+    at: int = 0
+    written: list[str] = []
+    real: bool = false
+}
+
+fun stdio() -> Io = Io(real: true)
+
+fun memory(lines: list[str]) -> Io = Io(input: lines)
+
+impl Io {
+    // The next line, or "" at the end of input.
+    fun next(self) -> str {
+        if self.real {
+            return read_line()
+        }
+        if self.at >= len(self.input) {
+            return ""
+        }
+        self.at += 1
+        return self.input[self.at - 1]
+    }
+
+    fun write(self, line: str) {
+        print(line + "\n") if self.real else self.written.push(line)
+    }
+}
+
+class Command {
+    name: str
+    title: str
+    run: fun(Ctx, JsonValue) -> ()
+}
+
+class Handler {
+    event: str
+    run: fun(Ctx, JsonValue) -> ()
+}
+
+class Bind {
+    mode: str
+    keys: str
+    command: str
+}
+
+class Plugin {
+    name: str
+    commands: list[Command] = []
+    handlers: list[Handler] = []
+    bindings: list[Bind] = []
+}
+
+// What a handler uses to talk back to dusk.
+class Ctx {
+    io: Io
+    next_id: int = 1
+    // Messages that arrived while waiting for a response, handled next.
+    queue: list[str] = []
+}
+
+fun plugin(name: str) -> Plugin = Plugin(name: name)
+
+fun obj(pairs: list[(str, JsonValue)]) -> JsonValue {
+    let m: dict[str, JsonValue] = {}
+    for (k, v) in pairs {
+        m.set(k, v)
+    }
+    return json_object(m)
+}
+
+fun jstr(s: str) -> JsonValue = json_string(s)
+
+fun jint(n: int) -> JsonValue = json_int(n)
+
+// A string field of a message's params, "" when missing.
+fun param(params: JsonValue, key: str) -> str {
+    return match params.get(key) {
+        case Some(v) { v.as_string().unwrap_or("") }
+        case None { "" }
+    }
+}
+
+// An integer field of a message's params, `default` when missing.
+fun int_param(params: JsonValue, key: str, default: int) -> int {
+    return match params.get(key) {
+        case Some(v) { v.as_int().unwrap_or(default) }
+        case None { default }
+    }
+}
+
+fun id_of(v: JsonValue) -> int {
+    return match v.get("id") {
+        case Some(x) { x.as_int().unwrap_or(0 - 1) }
+        case None { 0 - 1 }
+    }
+}
+
+impl Ctx {
+    fun send(self, pairs: list[(str, JsonValue)]) {
+        let all: list[(str, JsonValue)] = [("jsonrpc", jstr("2.0"))]
+        for p in pairs {
+            all.push(p)
+        }
+        self.io.write(stringify(obj(all)))
+    }
+
+    fun notify(self, method: str, params: JsonValue) {
+        self.send([("method", jstr(method)), ("params", params)])
+    }
+
+    fun reply(self, id: int, result: JsonValue) {
+        self.send([("id", jint(id)), ("result", result)])
+    }
+
+    fun reply_error(self, id: int, message: str) {
+        self.send(
+            [
+                ("id", jint(id)),
+                ("error", obj([("code", jint(0 - 32000)), ("message", jstr(message))])),
+            ],
+        )
+    }
+
+    // Send a request and wait for its response. Anything else that arrives
+    // meanwhile is queued for the serve loop.
+    fun request(self, method: str, params: JsonValue) -> Result[JsonValue, str] {
+        let id = self.next_id
+        self.next_id += 1
+        self.send([("id", jint(id)), ("method", jstr(method)), ("params", params)])
+        while true {
+            let line = self.io.next()
+            if line == "" {
+                return Err("dusk closed the connection")
+            }
+            let v = match parse(line) {
+                case Ok(x) { x }
+                case Err(e) {
+                    continue
+                }
+            }
+            if v.get("method").is_none() and id_of(v) == id {
+                match v.get("error") {
+                    case Some(e) {
+                        return Err(param(e, "message"))
+                    }
+                    case None {}
+                }
+                return Ok(v.get("result").unwrap_or(JsonValue.Null))
+            }
+            self.queue.push(line)
+        }
+        return Err("unreachable")
+    }
+
+    // Show text in dusk's message line.
+    fun message(self, text: str) {
+        self.notify("ui/message", obj([("text", jstr(text))]))
+    }
+
+    fun error(self, text: str) {
+        self.notify("ui/message", obj([("text", jstr(text)), ("error", JsonValue.Bool(true))]))
+    }
+
+    // Set a status line item; empty text removes it.
+    fun status(self, id: str, text: str) {
+        self.notify("status/set", obj([("id", jstr(id)), ("text", jstr(text))]))
+    }
+
+    // The text of an open buffer, or of a file on disk.
+    fun buffer_text(self, path: str) -> Result[str, str] {
+        return match self.request("buffer/text", obj([("path", jstr(path))])) {
+            case Ok(r) { Ok(param(r, "text")) }
+            case Err(e) { Err(e) }
+        }
+    }
+
+    // The buffer's version together with its text, for a later edit.
+    fun buffer(self, path: str) -> Result[(str, int), str] {
+        return match self.request("buffer/text", obj([("path", jstr(path))])) {
+            case Ok(r) { Ok((param(r, "text"), int_param(r, "version", 0 - 1))) }
+            case Err(e) { Err(e) }
+        }
+    }
+
+    // Replace ranges (start row, start col, end row, end col, text) in one
+    // undo step. Fails when the buffer changed since `version`. Returns the
+    // new version.
+    fun edit(
+        self,
+        path: str,
+        version: int,
+        edits: list[(int, int, int, int, str)],
+    ) -> Result[int, str] {
+        let items: list[JsonValue] = []
+        for (r1, c1, r2, c2, text) in edits {
+            items.push(
+                obj(
+                    [
+                        ("start", json_array([jint(r1), jint(c1)])),
+                        ("end", json_array([jint(r2), jint(c2)])),
+                        ("text", jstr(text)),
+                    ],
+                ),
+            )
+        }
+        let params = obj(
+            [("path", jstr(path)), ("version", jint(version)), ("edits", json_array(items))],
+        )
+        return match self.request("buffer/edit", params) {
+            case Ok(r) { Ok(int_param(r, "version", 0 - 1)) }
+            case Err(e) { Err(e) }
+        }
+    }
+
+    // Open a file in dusk at a line (counted from 1).
+    fun open(self, path: str, line: int) {
+        let _ = self.request("buffer/open", obj([("path", jstr(path)), ("line", jint(line))]))
+    }
+
+    fun register(self, name: str, title: str) {
+        let cmd = obj([("name", jstr(name)), ("title", jstr(title))])
+        self.notify("commands/register", obj([("commands", json_array([cmd]))]))
+    }
+}
+
+impl Plugin {
+    // Add a command. Its name should start with the plugin name and a dot.
+    fun command(self, name: str, title: str, run: fun(Ctx, JsonValue) -> ()) -> Plugin {
+        self.commands.push(Command(name: name, title: title, run: run))
+        return self
+    }
+
+    // Handle a notification from dusk, such as "buffer/opened" or
+    // "buffer/changed".
+    fun on(self, event: str, run: fun(Ctx, JsonValue) -> ()) -> Plugin {
+        self.handlers.push(Handler(event: event, run: run))
+        return self
+    }
+
+    // Suggest a key binding. dusk ignores it if the key is already bound.
+    fun bind(self, mode: str, keys: str, command: str) -> Plugin {
+        self.bindings.push(Bind(mode: mode, keys: keys, command: command))
+        return self
+    }
+
+    // Serve on stdin and stdout until dusk says shutdown or closes the pipe.
+    fun serve(self) {
+        self.serve_with(stdio())
+    }
+
+    fun serve_with(self, io: Io) {
+        let ctx = Ctx(io: io)
+        while true {
+            var line = ""
+            if len(ctx.queue) > 0 {
+                line = ctx.queue.remove_at(0)
+            } else {
+                line = io.next()
+            }
+            if line == "" {
+                return
+            }
+            if not self.handle(ctx, line) {
+                return
+            }
+        }
+    }
+
+    fun contributions(self) -> JsonValue {
+        let cmds: list[JsonValue] = []
+        for c in self.commands {
+            cmds.push(obj([("name", jstr(c.name)), ("title", jstr(c.title))]))
+        }
+        let binds: list[JsonValue] = []
+        for b in self.bindings {
+            binds.push(obj([("mode", jstr(b.mode)), ("keys", jstr(b.keys)), ("command", jstr(b.command))]))
+        }
+        return obj(
+            [
+                ("name", jstr(self.name)),
+                ("commands", json_array(cmds)),
+                ("bindings", json_array(binds)),
+            ],
+        )
+    }
+
+    // Returns false once dusk asks the plugin to shut down.
+    fun handle(self, ctx: Ctx, line: str) -> bool {
+        let v = match parse(line) {
+            case Ok(x) { x }
+            case Err(e) {
+                return true
+            }
+        }
+        let method = param(v, "method")
+        let id = id_of(v)
+        let params = v.get("params").unwrap_or(JsonValue.Null)
+        if method == "" {
+            return true
+        }
+        if method == "initialize" {
+            ctx.reply(id, self.contributions())
+        } else if method == "shutdown" {
+            ctx.reply(id, obj([]))
+            return false
+        } else if method == "command/run" {
+            let name = param(params, "command")
+            for c in self.commands {
+                if c.name == name {
+                    let run = c.run
+                    run(ctx, params)
+                    ctx.reply(id, obj([]))
+                    return true
+                }
+            }
+            ctx.reply_error(id, "${self.name} has no command ${name}")
+        } else if id >= 0 {
+            ctx.reply_error(id, "${self.name} does not handle ${method}")
+        } else {
+            for h in self.handlers {
+                if h.event == method {
+                    let run = h.run
+                    run(ctx, params)
+                }
+            }
+        }
+        return true
+    }
+}
