@@ -7,7 +7,7 @@ JSON-RPC on stdin and stdout; this package handles that, so a plugin is a
 
 ```toml
 [dependencies]
-"github.com/martian56/dusk-plugin" = "v0.2.0"
+"github.com/martian56/dusk-plugin" = "v0.3.0"
 ```
 
 ```rust
@@ -51,6 +51,7 @@ protocol = true
 A handler talks back through its `Ctx`:
 
 - `message(text)` and `error(text)` show text in the message line.
+- `log(text)` writes a line to the plugin's log (`:plugin log <name>` in dusk).
 - `status(id, text)` sets a status line item; empty text removes it.
 - `buffer_text(path)` returns a buffer's text, or a file's when it is not
   open. `buffer(path)` also returns its version.

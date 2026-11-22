@@ -149,3 +149,18 @@ fun test_pick_waits_for_answer() {
     assert_true(out[1].contains("ui/prompt"))
     assert_true(out[2].contains("picked 1, cancelled"))
 }
+
+fun logs(ctx: Ctx, params: JsonValue) {
+    ctx.log("ran")
+}
+
+fun test_log_stays_out_of_the_protocol() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"command/run\",\"params\":{\"command\":\"demo.log\"}}",
+        ],
+    )
+    plugin("demo").command("demo.log", "Log", logs).serve_with(io)
+    assert_eq_int(len(io.written), 1)
+    assert_eq_str(io.logged[0], "ran")
+}
