@@ -31,7 +31,7 @@ jobs:
           raven-version: "3.3.3"
 
       - name: Build
-        run: rvpm build && raven build examples/wordcount.rv -o target/wordcount
+        run: rvpm build && raven build examples/wordcount.rv -o wordcount
 
       - name: Test
         run: rvpm test

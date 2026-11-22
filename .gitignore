@@ -2,3 +2,4 @@ target/
 *.exe
 *.pdb
 rv.lock
+wordcount
