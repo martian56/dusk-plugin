@@ -1,6 +1,17 @@
 from std.test import assert_eq_str, assert_eq_int, assert_true
 from std.json import JsonValue, parse
-from "./lib" import Plugin, Ctx, plugin, param, memory
+from "./lib" import (
+    Plugin,
+    Ctx,
+    plugin,
+    param,
+    memory,
+    text_block,
+    list_block,
+    input_block,
+    buttons_block,
+    progress_block,
+)
 
 fun hello(ctx: Ctx, params: JsonValue) {
     ctx.message("hello ${param(params, "path")}")
@@ -65,4 +76,76 @@ fun test_buffer_text_queues_other_messages() {
     assert_true(out[2].contains("chars: 3"))
     assert_true(out[3].contains("\"id\":2"))
     assert_true(out[4].contains("b.rv"))
+}
+
+fun show_panel(ctx: Ctx, params: JsonValue) {
+    ctx.panel(
+        "p1",
+        "Results",
+        "right",
+        [
+            text_block("intro", "# Hits"),
+            list_block("hits", [("a.rv", "line 3"), ("b.rv", "")]),
+            input_block("ask", ""),
+            buttons_block("act", ["Run", "Stop"]),
+            progress_block("busy", "working", 40),
+        ],
+    )
+    ctx.marks("a.rv", [(2, "warning", "TODO here")])
+}
+
+fun choose(ctx: Ctx, params: JsonValue) {
+    let i = ctx.pick("Pick one", ["x", "y"])
+    match ctx.prompt("Name", "") {
+        case Some(t) { ctx.message("picked ${i}, typed ${t}") }
+        case None { ctx.message("picked ${i}, cancelled") }
+    }
+}
+
+fun ui_plugin() -> Plugin {
+    return plugin("demo").command("demo.panel", "Panel", show_panel).command(
+        "demo.choose",
+        "Choose",
+        choose,
+    )
+}
+
+fun test_panel_builders_emit_blocks() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"command/run\",\"params\":{\"command\":\"demo.panel\"}}",
+        ],
+    )
+    ui_plugin().serve_with(io)
+    let out = io.written
+    assert_true(out[0].contains("ui/panel"))
+    for want in [
+        "\"kind\":\"text\"",
+        "\"kind\":\"list\"",
+        "\"detail\":\"line 3\"",
+        "\"kind\":\"input\"",
+        "\"kind\":\"buttons\"",
+        "\"value\":40",
+        "\"dock\":\"right\"",
+    ] {
+        assert_true(out[0].contains(want))
+    }
+    assert_true(
+        out[1].contains("marks/set") and out[1].contains("\"row\":2") and out[1].contains("warning"),
+    )
+}
+
+fun test_pick_waits_for_answer() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"command/run\",\"params\":{\"command\":\"demo.choose\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"index\":1,\"label\":\"y\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"cancelled\":true}}",
+        ],
+    )
+    ui_plugin().serve_with(io)
+    let out = io.written
+    assert_true(out[0].contains("ui/pick"))
+    assert_true(out[1].contains("ui/prompt"))
+    assert_true(out[2].contains("picked 1, cancelled"))
 }

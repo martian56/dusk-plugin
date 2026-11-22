@@ -7,7 +7,7 @@ JSON-RPC on stdin and stdout; this package handles that, so a plugin is a
 
 ```toml
 [dependencies]
-"github.com/martian56/dusk-plugin" = "v0.1.0"
+"github.com/martian56/dusk-plugin" = "v0.2.0"
 ```
 
 ```rust
@@ -60,17 +60,38 @@ A handler talks back through its `Ctx`:
 - `open(path, line)` opens a file at a line counted from 1.
 - `register(name, title)` adds a command while running.
 
+UI that dusk draws:
+
+- `panel(id, title, dock, blocks)` opens a panel docked `"right"` or
+  `"bottom"`, or replaces the one with the same id (the user's selection and
+  typed text are kept). Blocks are built with `text_block(id, markdown)`,
+  `list_block(id, items)` with `(label, detail)` rows, `input_block(id, text)`,
+  `buttons_block(id, labels)`, and `progress_block(id, label, value)` (value
+  0 to 100, or -1 for a spinner). `close(id)` closes it.
+- What the user does in a panel arrives as a `ui/event` notification, so
+  handle it with `on("ui/event", run)`: its params carry `panel`, `block`,
+  `kind` (`choose`, `submit`, `press`, or `closed`), and `value`.
+- `pick(title, items)` asks the user to choose and returns the index, or -1.
+- `prompt(title, initial)` asks for a line of text and returns
+  `Some(text)`, or `None` when dismissed.
+- `marks(path, marks)` replaces this plugin's marks on a file, each
+  `(row, severity, message)` with severity `error`, `warning`, `info`, or
+  `hint`. They show in the gutter, and the message shows when the cursor is
+  on the row.
+
 `param(params, key)` and `int_param(params, key, default)` read fields of the
 params. The protocol itself is described in dusk's
 [docs/protocol.md](https://github.com/martian56/dusk/blob/main/docs/protocol.md).
 
-## Example
+## Examples
 
-`examples/wordcount.rv` keeps a word count in the status line and adds a
-`wordcount.show` command:
+- `examples/wordcount.rv` keeps a word count in the status line and adds a
+  `wordcount.show` command.
+- `examples/todo.rv` lists the TODO and FIXME lines of the current file in a
+  panel, marks them in the gutter, and jumps to the one you choose.
 
 ```sh
-raven build examples/wordcount.rv -o wordcount
+raven build examples/todo.rv -o todo
 ```
 
 ## License

@@ -341,3 +341,105 @@ impl Plugin {
         return true
     }
 }
+
+// Panel blocks, laid out top to bottom.
+
+// Markdown text.
+fun text_block(id: str, markdown: str) -> JsonValue {
+    return obj([("id", jstr(id)), ("kind", jstr("text")), ("text", jstr(markdown))])
+}
+
+// Selectable rows as (label, detail); choosing one sends a "ui/event" with
+// kind "choose" and the row's index as value.
+fun list_block(id: str, items: list[(str, str)]) -> JsonValue {
+    let rows: list[JsonValue] = []
+    for (label, detail) in items {
+        rows.push(obj([("label", jstr(label)), ("detail", jstr(detail))]))
+    }
+    return obj([("id", jstr(id)), ("kind", jstr("list")), ("items", json_array(rows))])
+}
+
+// A text box. Enter sends a "ui/event" with kind "submit" and the text as
+// value; Ctrl+N inserts a newline. Empty `text` keeps what the user typed.
+fun input_block(id: str, text: str) -> JsonValue {
+    return obj([("id", jstr(id)), ("kind", jstr("input")), ("text", jstr(text))])
+}
+
+// A row of buttons; pressing one sends kind "press" with its index.
+fun buttons_block(id: str, labels: list[str]) -> JsonValue {
+    return obj(
+        [
+            ("id", jstr(id)),
+            ("kind", jstr("buttons")),
+            ("items", json_array(labels.map(l => jstr(l)))),
+        ],
+    )
+}
+
+// A spinner with a label, or a bar when `value` is 0 to 100 (-1 for none).
+fun progress_block(id: str, label: str, value: int) -> JsonValue {
+    return obj(
+        [
+            ("id", jstr(id)),
+            ("kind", jstr("progress")),
+            ("text", jstr(label)),
+            ("value", jint(value)),
+        ],
+    )
+}
+
+impl Ctx {
+    // Open a panel, or replace the one with this id. `dock` is "right" or
+    // "bottom".
+    fun panel(self, id: str, title: str, dock: str, blocks: list[JsonValue]) {
+        let p = obj(
+            [
+                ("id", jstr(id)),
+                ("title", jstr(title)),
+                ("dock", jstr(dock)),
+                ("blocks", json_array(blocks)),
+            ],
+        )
+        self.notify("ui/panel", p)
+    }
+
+    fun close(self, id: str) {
+        self.notify("ui/close", obj([("id", jstr(id))]))
+    }
+
+    // Ask the user to pick one of `items`. Returns its index, -1 when
+    // dismissed.
+    fun pick(self, title: str, items: list[str]) -> int {
+        let params = obj([("title", jstr(title)), ("items", json_array(items.map(i => jstr(i))))])
+        return match self.request("ui/pick", params) {
+            case Ok(r) { int_param(r, "index", 0 - 1) }
+            case Err(e) { 0 - 1 }
+        }
+    }
+
+    // Ask for a line of text. None when dismissed.
+    fun prompt(self, title: str, initial: str) -> Option[str] {
+        match self.request("ui/prompt", obj([("title", jstr(title)), ("text", jstr(initial))])) {
+            case Ok(r) {
+                if r.get("cancelled").is_some() {
+                    return None
+                }
+                return Some(param(r, "text"))
+            }
+            case Err(e) {
+                return None
+            }
+        }
+        return None
+    }
+
+    // Replace this plugin's marks on `path`: (row from 0, severity, message),
+    // severity "error", "warning", "info", or "hint".
+    fun marks(self, path: str, marks: list[(int, str, str)]) {
+        let items: list[JsonValue] = []
+        for (row, severity, message) in marks {
+            items.push(obj([("row", jint(row)), ("severity", jstr(severity)), ("message", jstr(message))]))
+        }
+        self.notify("marks/set", obj([("path", jstr(path)), ("marks", json_array(items))]))
+    }
+}

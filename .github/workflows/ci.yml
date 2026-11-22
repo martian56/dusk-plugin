@@ -28,10 +28,10 @@ jobs:
       - name: Install Raven
         uses: martian56/setup-raven@v1
         with:
-          raven-version: "3.3.3"
+          raven-version: "3.3.4"
 
       - name: Build
-        run: rvpm build && raven build examples/wordcount.rv -o wordcount
+        run: rvpm build && raven build examples/wordcount.rv -o wordcount && raven build examples/todo.rv -o todo
 
       - name: Test
         run: rvpm test
