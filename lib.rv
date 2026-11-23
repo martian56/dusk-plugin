@@ -352,6 +352,31 @@ impl Plugin {
 // Panel blocks, laid out top to bottom.
 
 // Markdown text.
+// A theme to send with `Ctx.define_theme`. Everything left empty comes from
+// `base`, one of dusk's built-in themes. The tables are (name, value) pairs:
+// colors "#rrggbb", styles such as "bold italic", one-character glyphs
+// ("brand" up to 16), and mode labels up to 12 characters. The names are
+// listed in dusk's README under Themes.
+class ThemeSpec {
+    name: str
+    base: str = "dusk"
+    description: str = ""
+    colors: list[(str, str)] = []
+    styles: list[(str, str)] = []
+    glyphs: list[(str, str)] = []
+    labels: list[(str, str)] = []
+}
+
+fun theme(name: str) -> ThemeSpec = ThemeSpec(name: name)
+
+fun pairs(items: list[(str, str)]) -> JsonValue {
+    let m: dict[str, JsonValue] = {}
+    for (k, v) in items {
+        m.set(k, jstr(v))
+    }
+    return json_object(m)
+}
+
 fun text_block(id: str, markdown: str) -> JsonValue {
     return obj([("id", jstr(id)), ("kind", jstr("text")), ("text", jstr(markdown))])
 }
@@ -438,6 +463,52 @@ impl Ctx {
             }
         }
         return None
+    }
+
+    // Add a theme to dusk, or replace one added before. dusk reports a bad
+    // color, style, glyph or label in its message line.
+    fun define_theme(self, t: ThemeSpec) {
+        let p = obj(
+            [
+                ("name", jstr(t.name)),
+                ("base", jstr(t.base)),
+                ("description", jstr(t.description)),
+                ("colors", pairs(t.colors)),
+                ("styles", pairs(t.styles)),
+                ("glyphs", pairs(t.glyphs)),
+                ("labels", pairs(t.labels)),
+            ],
+        )
+        self.notify("theme/define", p)
+    }
+
+    // Switch dusk to the theme `name`.
+    fun set_theme(self, name: str) {
+        self.notify("theme/set", obj([("name", jstr(name))]))
+    }
+
+    // Every theme dusk knows as (name, description), and the current one.
+    fun themes(self) -> Result[(list[(str, str)], str), str] {
+        return match self.request("theme/list", obj([])) {
+            case Ok(r) {
+                let out: list[(str, str)] = []
+                match r.get("themes") {
+                    case Some(v) {
+                        match v {
+                            case Array(items) {
+                                for it in items {
+                                    out.push((param(it, "name"), param(it, "description")))
+                                }
+                            }
+                            case _ {}
+                        }
+                    }
+                    case None {}
+                }
+                Ok((out, param(r, "current")))
+            }
+            case Err(e) { Err(e) }
+        }
     }
 
     // Replace this plugin's marks on `path`: (row from 0, severity, message),

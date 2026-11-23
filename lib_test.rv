@@ -11,6 +11,7 @@ from "./lib" import (
     input_block,
     buttons_block,
     progress_block,
+    theme,
 )
 
 fun hello(ctx: Ctx, params: JsonValue) {
@@ -163,4 +164,37 @@ fun test_log_stays_out_of_the_protocol() {
     plugin("demo").command("demo.log", "Log", logs).serve_with(io)
     assert_eq_int(len(io.written), 1)
     assert_eq_str(io.logged[0], "ran")
+}
+
+fun themed(ctx: Ctx, params: JsonValue) {
+    let t = theme("neon")
+    t.base = "nord"
+    t.colors = [("ui.bg", "#000000")]
+    t.labels = [("normal", "GLOW")]
+    ctx.define_theme(t)
+    ctx.set_theme("neon")
+    match ctx.themes() {
+        case Ok(r) {
+            let (names, current) = r
+            ctx.message("${len(names)} themes, ${names[1].0}: ${names[1].1}, on ${current}")
+        }
+        case Err(e) { ctx.message("failed: ${e}") }
+    }
+}
+
+fun test_theme_calls() {
+    let io = memory(
+        [
+            "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"command/run\",\"params\":{\"command\":\"demo.theme\"}}",
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"themes\":[{\"name\":\"dusk\",\"description\":\"\"},{\"name\":\"neon\",\"description\":\"glow\"}],\"current\":\"neon\"}}",
+        ],
+    )
+    plugin("demo").command("demo.theme", "Theme", themed).serve_with(io)
+    let out = io.written
+    assert_true(out[0].contains("theme/define"))
+    assert_true(out[0].contains("\"base\":\"nord\""))
+    assert_true(out[0].contains("\"normal\":\"GLOW\""))
+    assert_true(out[1].contains("theme/set"))
+    assert_true(out[2].contains("theme/list"))
+    assert_true(out[3].contains("2 themes, neon: glow, on neon"))
 }

@@ -1,7 +1,7 @@
 # Installing this repository with :plugin install gives the TODO finder
 # example; the package itself is the SDK.
 name = "todo"
-version = "0.3.0"
+version = "0.4.0"
 description = "List TODO and FIXME lines in a panel"
 command = "./todo"
 activation = ["startup"]

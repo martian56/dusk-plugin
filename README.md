@@ -7,7 +7,7 @@ JSON-RPC on stdin and stdout; this package handles that, so a plugin is a
 
 ```toml
 [dependencies]
-"github.com/martian56/dusk-plugin" = "v0.3.0"
+"github.com/martian56/dusk-plugin" = "v0.4.0"
 ```
 
 ```rust
@@ -79,6 +79,18 @@ UI that dusk draws:
   `(row, severity, message)` with severity `error`, `warning`, `info`, or
   `hint`. They show in the gutter, and the message shows when the cursor is
   on the row.
+
+Themes (dusk 0.5.0 or newer):
+
+- `define_theme(t)` adds a theme, or replaces one added before. Build it with
+  `theme(name)` and set its fields: `base` (a built-in theme), `description`,
+  and the tables `colors`, `styles`, `glyphs`, and `labels`, each a list of
+  `(name, value)` pairs. The names are listed in dusk's README under Themes.
+- `set_theme(name)` switches theme.
+- `themes()` returns every theme as `(name, description)` and the current one.
+
+A plugin that only ships theme files needs no code: set `themes = "themes"`
+in its `dusk-plugin.toml` and leave out `command`.
 
 `param(params, key)` and `int_param(params, key, default)` read fields of the
 params. The protocol itself is described in dusk's
